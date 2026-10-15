@@ -607,3 +607,78 @@ test('finished agents are grey and still; running ones keep their colour', EN, a
   expect(String(finished!.props.source)).toMatch(/#738769/i)
   await ui.unmount()
 })
+
+// --- the Agents tab is closed until asked; /panel opens and closes it with the other tabs ---
+
+const toasts: any[] = []
+function panelWorld(on: (name: string, fn: (...args: any[]) => unknown) => void, opens: any[], closes: any[], stored: Record<string, unknown> = {}, refuse = false) {
+  toasts.length = 0
+  on('session.start', () => ({ cwd: '/work' }))
+  on('command.register', () => { if (refuse) throw new Error('refused: the plugin herdr-notes registered it already'); return { value: undefined } })
+  on('ui.toast', ($: unknown, e: any) => { toasts.push(e); return { value: undefined } })
+  on('store.get', ($: unknown, e: any) => ({ value: stored[e.key] }))
+  on('store.set', ($: unknown, e: any) => { stored[e.key] = e.value; return { value: undefined } })
+  on('ui.open', ($: unknown, e: any) => { opens.push(e); return { value: { isPlaced: true } } })
+  on('ui.close', ($: unknown, e: any) => { closes.push(e); return { value: undefined } })
+  on('command.run', () => ({ text: 'answered by the owner of /panel' })) // the mod that registered it, beneath this one
+  on('agent.spawn', async () => ({ model: 'claude-opus-5-5', agentId: 'agent-1' }))
+  on('turn.complete', async () => ({ text: '' }))
+}
+const panelCmd = ($: any, args: string) => $.command.run({ command: 'panel', args } as never) as Promise<unknown>
+const spawnOne = ($: any) => $.agent.spawn({ prompt: 'go', description: 'Build the page', subagentType: 'general-purpose' } as any)
+
+test('the Agents tab does not open by itself: not at session start, not when the first subagent starts', EN, async ($, on) => {
+  const opens: any[] = []
+  panelWorld(on, opens, [])
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await spawnOne($)
+  expect(opens).toEqual([])
+})
+
+test('/panel opens the Agents tab and /panel off closes it', EN, async ($, on) => {
+  const opens: any[] = [], closes: any[] = []
+  panelWorld(on, opens, closes)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await panelCmd($, '')
+  expect(opens.map((o) => o.id)).toEqual(['pixel-crew-agents'])
+  await panelCmd($, 'off')
+  expect(closes.map((c) => c.id)).toEqual(['pixel-crew-agents'])
+})
+
+test('/panel auto on brings back opening by itself: at session start and for the first subagent', EN, async ($, on) => {
+  const opens: any[] = []
+  const stored: Record<string, unknown> = {}
+  panelWorld(on, opens, [], stored)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  await panelCmd($, 'auto on')
+  expect(stored.panelAuto).toBe(true)
+  expect(opens).toEqual([]) // setting it opens nothing now
+  await spawnOne($)
+  expect(opens.map((o) => o.id)).toEqual(['pixel-crew-agents']) // the first subagent opens it
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect(opens).toHaveLength(2) // and so does the next session start
+  await panelCmd($, 'auto off')
+  expect(stored.panelAuto).toBe(false)
+})
+
+test('the mod that registered /panel answers it; one that was refused leaves the owner\'s answer alone and still opens its tab', EN, async ($, on) => {
+  const opens: any[] = []
+  panelWorld(on, opens, [], {}, true)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect(((await panelCmd($, '')) as any).text).toBe('answered by the owner of /panel')
+  expect(opens.map((o) => o.id)).toEqual(['pixel-crew-agents'])
+})
+
+test('/panel answers for the owner with the tabs by their on-screen names', EN, async ($, on) => {
+  panelWorld(on, [], [])
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect(((await panelCmd($, '')) as any).text).toContain('Files, Agents and Notes')
+})
+
+test('it says once that the Agents tab now stays closed, and not again', EN, async ($, on) => {
+  panelWorld(on, [], [])
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect(toasts).toHaveLength(1)
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+  expect(toasts).toHaveLength(1)
+})

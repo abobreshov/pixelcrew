@@ -33,6 +33,19 @@ const now = atom({ plugin: 'pixel-crew', key: 'now' } as const, 0)
 const frame = atom({ plugin: 'pixel-crew', key: 'frame' } as const, 0)
 const showDone = atom({ plugin: 'pixel-crew', key: 'showDone' } as const, true)
 const bandOn = atom({ plugin: 'pixel-crew', key: 'bandOn' } as const, true)
+// /panel auto on: the Agents tab opens by itself (at session start, and when the first subagent starts). By default it
+// stays closed until /crew, the band's crew button or /panel.
+let panelAuto = false
+let ownsPanel = false // whichever of the tab mods registers /panel first answers it; the others only act on it
+
+/** What /panel answers, by the mod that owns it. */
+function panelSaid(arg: string): string {
+  if (arg === 'auto on') return 'Side panel: the Files, Agents and Notes tabs will open by themselves at the start of each session, for the tab mods installed now (from 110 columns wide once you have opened one, else 144).'
+  if (arg === 'auto off') return 'Side panel: the tabs stay closed until /panel.'
+  if (arg === 'off' || arg === 'close') return 'Side panel: closed.'
+  if (arg === '' || arg === 'on' || arg === 'open') return 'Side panel: opening the Files, Agents and Notes tabs (those of the mods installed).'
+  return 'Usage: /panel, /panel off, /panel auto on, /panel auto off'
+}
 const IDLE: PcMain = { activity: '', steps: 0, tools: 0, working: false, done: false }
 const main = atom({ plugin: 'pixel-crew', key: 'main' } as const, IDLE)
 // início do lote atual de subagents: os que começaram desde que nenhum rodava
@@ -273,7 +286,7 @@ async function addAgent($: EngineInterface, agent: PcAgent) {
   await update($, now, () => agent.startedAt)
   if (wasIdle) {
     await update($, batchStart, () => agent.startedAt)
-    $.ui.open({ id: PANE, title: 'Agents' }).catch(() => {})
+    if (panelAuto) $.ui.open({ id: PANE, title: 'Agents' }).catch(() => {})
   }
 }
 
@@ -306,6 +319,21 @@ export const register: Register = (on, options) => {
     // a escolha do /crew-bar vale para as próximas sessões também
     const saved = await $.store.get('bandOn').catch(() => undefined)
     if (typeof saved === 'boolean') await update($, bandOn, () => saved)
+    try {
+      await $.command.register({ name: 'panel', description: 'Show or hide the side panel: the Files, Agents and Notes tabs together. /panel off, /panel auto on|off', argumentHint: '[off|auto on|auto off]', immediate: true })
+      ownsPanel = true
+    } catch {
+      // another mod registered /panel first and owns it: this one only opens its own tab when it hears it
+    }
+    panelAuto = (await $.store.get('panelAuto').catch(() => undefined)) === true
+    if (!panelAuto && (await $.store.get('closedNotice').catch(() => undefined)) !== true) {
+      // once per machine: this tab used to open by itself with the first subagent
+      await $.store.set('closedNotice', true).catch(() => {})
+      try {
+        $.ui.toast('The Agents tab now stays closed: /crew opens it, /panel opens Files, Agents and Notes, /panel auto on restores opening by itself.')
+      } catch {}
+    }
+    if (panelAuto) await $.ui.open({ id: PANE, title: 'Agents' }).catch(() => {})
 
     // Relógio da animação: troca o quadro 30x por segundo enquanto há agent
     // rodando ou tarefa em andamento; parado, não escreve nada.
@@ -382,6 +410,25 @@ export const register: Register = (on, options) => {
     await update($, bandOn, () => want)
     await $.store.set('bandOn', want).catch(() => {})
     return { text: want ? L.barOn : L.barOff }
+  })
+
+  // /panel: every mod with a tab hears it, opens or closes its own and passes it on; the mod that owns the command answers last.
+  on('command.run', { command: 'panel' }, async ($, e, next) => {
+    const arg = (e.args ?? '').trim().toLowerCase()
+    try {
+      if (arg === 'auto on' || arg === 'auto off') {
+        panelAuto = arg === 'auto on'
+        await $.store.set('panelAuto', panelAuto)
+      } else if (arg === 'off' || arg === 'close') {
+        await $.ui.close({ id: PANE })
+      } else if (arg === '' || arg === 'on' || arg === 'open') {
+        await $.ui.open({ id: PANE, title: 'Agents' })
+      }
+    } catch {
+      // no surface to draw on: the other tabs still get the command
+    }
+    const rest = await next(e)
+    return ownsPanel ? { text: panelSaid(arg) } : rest
   })
 
   on('command.run', { command: 'crew-clear' }, async $ => {

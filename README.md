@@ -19,7 +19,7 @@ A pixel-art progress bar with the Claude mascot, and a side panel that turns you
 
 ![The mascot's moods](docs/moods.png)
 
-**An Agents panel.** Every subagent gets a row: its character, its role, the model and effort, what it is doing, context used, tokens, estimated cost, time, and its own progress bar. Totals for cost, tokens and time sit on top. The panel opens by itself when the first subagent starts.
+**An Agents panel.** Every subagent gets a row: its character, its role, the model and effort, what it is doing, context used, tokens, estimated cost, time, and its own progress bar. Totals for cost, tokens and time sit on top. The panel is closed until you ask for it: `/crew`, the crew button in the band, or `/panel` (which opens this tab together with the Files and Notes tabs when those mods are installed; `/panel off` closes them, `/panel auto on` opens them by themselves). `/panel auto on` brings back opening by itself, at the start of a session and when the first subagent starts.
 
 <img src="docs/panel.png" alt="The Agents panel" width="420">
 
